@@ -28,6 +28,15 @@
 
 ## 安装
 
+克隆项目并进入目录：
+
+```bash
+git clone https://github.com/SoyBeanMilkx/MailPilot.git
+cd MailPilot
+```
+
+安装 Node.js 依赖：
+
 ```bash
 npm install
 ```
