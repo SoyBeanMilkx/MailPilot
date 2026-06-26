@@ -38,6 +38,8 @@
   ],
   "commandPrefix": "[COMMAND]",
   "maxReplyLength": 4000,
+  "agentTimeoutMs": 1800000,
+  "agentCreateTimeoutMs": 120000,
   "imap": {
     "host": "imap.qq.com",
     "port": 993,

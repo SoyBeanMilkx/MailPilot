@@ -1,10 +1,37 @@
 import { ImapFlow } from "imapflow";
-import { activeAgentName } from "./bridge/agents.mjs";
+import { activeAgentName, stopRunningAgentProcesses } from "./bridge/agents.mjs";
 import { envLoad, loadConfig } from "./bridge/config.mjs";
 import { acquireLock } from "./bridge/lock.mjs";
 import { createMailer } from "./bridge/mailer.mjs";
 import { fetchAndProcess } from "./bridge/message.mjs";
 import { loadState, saveState, syncMailboxState } from "./bridge/state.mjs";
+
+function createImapClient(cfg) {
+  const client = new ImapFlow({
+    host: cfg.imap.host,
+    port: cfg.imap.port,
+    secure: cfg.imap.tls,
+    auth: {
+      user: process.env.IMAP_USER,
+      pass: process.env.IMAP_PASS,
+    },
+    logger: false,
+  });
+
+  client.on("error", (err) => console.error("[bridge] IMAP error:", err.message));
+  return client;
+}
+
+function shouldReconnectImap(err) {
+  const text = `${err?.code || ""} ${err?.message || ""}`.toLowerCase();
+  return (
+    text.includes("noconnection") ||
+    text.includes("connection not available") ||
+    text.includes("socket timeout") ||
+    text.includes("unexpected close") ||
+    text.includes("closed")
+  );
+}
 
 async function main() {
   const releaseLock = acquireLock();
@@ -21,25 +48,53 @@ async function main() {
   console.log(`[bridge] agent: ${activeAgentName(cfg)}`);
   console.log(`[bridge] ${Object.keys(state.threads || {}).length} threads, ${(state.seenIds || []).length} seen`);
 
-  const client = new ImapFlow({
-    host: cfg.imap.host,
-    port: cfg.imap.port,
-    secure: cfg.imap.tls,
-    auth: {
-      user: process.env.IMAP_USER,
-      pass: process.env.IMAP_PASS,
-    },
-    logger: false,
-  });
+  let client = null;
+  let connecting = null;
+  let mailboxInfo = null;
+  let pollBusy = false;
 
-  client.on("error", (err) => console.error("[bridge] IMAP error:", err.message));
+  async function closeClient() {
+    if (!client) return;
+    const oldClient = client;
+    client = null;
+    try {
+      if (oldClient.usable) await oldClient.logout();
+      else oldClient.close();
+    } catch {
+      try { oldClient.close(); } catch {}
+    }
+  }
 
-  await client.connect();
-  console.log("[bridge] IMAP connected");
+  async function connectClient() {
+    if (client?.usable) return client;
+    if (connecting) return connecting;
 
-  const mailbox = await client.mailboxOpen("INBOX");
-  syncMailboxState(state, mailbox);
-  console.log(`[bridge] INBOX: ${mailbox.exists} messages, uidNext=${mailbox.uidNext || "unknown"}, lastUid=${state.lastUid}`);
+    connecting = (async () => {
+      await closeClient();
+      const nextClient = createImapClient(cfg);
+      nextClient.on("close", () => {
+        console.error("[bridge] IMAP closed");
+        if (client === nextClient) client = null;
+      });
+
+      await nextClient.connect();
+      client = nextClient;
+      console.log("[bridge] IMAP connected");
+
+      mailboxInfo = await nextClient.mailboxOpen("INBOX");
+      syncMailboxState(state, mailboxInfo);
+      console.log(`[bridge] INBOX: ${mailboxInfo.exists} messages, uidNext=${mailboxInfo.uidNext || "unknown"}, lastUid=${state.lastUid}`);
+
+      return nextClient;
+    })().finally(() => {
+      connecting = null;
+    });
+
+    return connecting;
+  }
+
+  await connectClient();
+  const mailbox = mailboxInfo;
 
   if (mailbox.exists > 0) {
     const lastUid = Number.parseInt(state.lastUid || 0, 10) || 0;
@@ -51,13 +106,17 @@ async function main() {
   }
 
   setInterval(async () => {
+    if (pollBusy) return;
+    pollBusy = true;
+
     try {
-      const status = await client.status("INBOX", { messages: true, uidNext: true });
+      const imapClient = await connectClient();
+      const status = await imapClient.status("INBOX", { messages: true, uidNext: true });
       const uidNext = Number.parseInt(status.uidNext || 0, 10) || 0;
       const nextUid = (Number.parseInt(state.lastUid || 0, 10) || 0) + 1;
       if (uidNext && uidNext > nextUid) {
         console.log(`[bridge] new UID(s): ${nextUid}:* (uidNext=${uidNext}, messages=${status.messages})`);
-        const count = await fetchAndProcess(client, ctx, `${nextUid}:*`, { uid: true });
+        const count = await fetchAndProcess(imapClient, ctx, `${nextUid}:*`, { uid: true });
         if (count === 0) {
           state.lastUid = Math.max(Number.parseInt(state.lastUid || 0, 10) || 0, uidNext - 1);
           saveState(state);
@@ -65,6 +124,17 @@ async function main() {
       }
     } catch (e) {
       console.error("[bridge] poll error:", e.message);
+      if (shouldReconnectImap(e)) {
+        try {
+          await closeClient();
+          await connectClient();
+          console.log("[bridge] IMAP reconnected");
+        } catch (reconnectError) {
+          console.error("[bridge] IMAP reconnect failed:", reconnectError.message);
+        }
+      }
+    } finally {
+      pollBusy = false;
     }
   }, 3000);
 
@@ -74,7 +144,8 @@ async function main() {
 
   async function shutdown() {
     console.log("\n[bridge] shutting down...");
-    await client.logout();
+    stopRunningAgentProcesses();
+    await closeClient();
     process.exit(0);
   }
 

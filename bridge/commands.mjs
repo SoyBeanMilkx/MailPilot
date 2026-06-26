@@ -1,6 +1,7 @@
 import { activeAgentName, availableAgents, deleteThreadSessions, isSupportedAgent } from "./agents.mjs";
 import { saveConfig, validateWorkspaceDir } from "./config.mjs";
-import { getOrCreateThread, getThread, listThreadSessions, saveState, workspaceForThread } from "./state.mjs";
+import { activeJobForThread, compactJobStatus, formatAllJobStatuses, formatThreadStatus } from "./jobs.mjs";
+import { getOrCreateThread, getThread, listThreadSessions, saveState, threadKey, workspaceForThread } from "./state.mjs";
 
 export function hasCommand(cfg, body) {
   return body.includes(cfg.commandPrefix);
@@ -10,12 +11,14 @@ function formatThread(key, thread, index) {
   const sessions = listThreadSessions(thread)
     .map(([agentName, sessionId]) => `${agentName}:${sessionId}`)
     .join(", ") || "(none)";
+  const activeJob = activeJobForThread(key);
 
   return [
     `${index + 1}. [${key}]`,
     `   title: ${thread.title}`,
     `   cwd: ${thread.workspaceDir || "(default)"}`,
     `   sessions: ${sessions}`,
+    `   job: ${activeJob ? compactJobStatus(activeJob) : "(none)"}`,
     `   from: ${thread.fromEmail}`,
     `   created: ${new Date(thread.createdAt).toLocaleString("zh-CN")}`,
   ].join("\n");
@@ -48,6 +51,7 @@ export function handleCommand({ cfg, state }, body, meta = {}) {
         `${prefix} delete-all                      - delete ALL sessions`,
         `${prefix} agent [opencode|codex]          - show or switch active agent`,
         `${prefix} cwd [--create] <absolute-path>  - show or set workspace for a new thread`,
+        `${prefix} status [all]                    - show agent working state`,
         `${prefix} config                          - show current config`,
         `${prefix} whitelist add|remove <email>    - manage whitelist`,
       ].join("\n");
@@ -94,6 +98,13 @@ export function handleCommand({ cfg, state }, body, meta = {}) {
       cfg.activeAgent = nextAgent;
       saveConfig(cfg);
       return `Agent switched to: ${nextAgent}`;
+    }
+
+    case "status":
+    case "jobs": {
+      if (parts[1]?.toLowerCase() === "all") return formatAllJobStatuses();
+      if (!meta.fromEmail || !meta.subject) return "Status commands require an email thread.";
+      return formatThreadStatus(threadKey(meta.fromEmail, meta.subject));
     }
 
     case "cwd":

@@ -17,6 +17,12 @@
 
 邮箱天然有“会话”概念，邮件主题和回复链可以很自然地映射到 Agent session：一个邮件会话对应一组 opencode/codex 会话，切换和追踪都更清楚。邮箱 UI 也适合写长任务、贴日志、保留上下文和搜索历史；相比即时聊天，它更像一个轻量的异步任务面板。
 
+## 展示
+
+| 邮件任务 | 运行状态 |
+| --- | --- |
+| ![MailPilot 邮件任务展示](art/show_1.png) | ![MailPilot 运行状态展示](art/show_2.png) |
+
 ## 需要准备什么
 
 - Node.js 18 或更新版本
@@ -62,6 +68,7 @@ SMTP_PASS=your-mail-authorization-code
 - `senderName`：自动回复邮件里显示的发件人名字
 - `workspaceDir`：默认工作目录
 - `whitelist`：允许控制 bridge 的发件人邮箱
+- `agentTimeoutMs`：Agent 单次任务最长等待时间
 - `agents.opencode.path`：`opencode` 可执行文件路径
 - `agents.codex.path`：`codex` 可执行文件路径
 
@@ -84,6 +91,8 @@ SMTP_PASS=your-mail-authorization-code
 | `skipSubjectKeywords` | 否 | 静默跳过的主题关键词，例如 `退信`、`bounce`、`undeliver`。匹配不区分大小写。 |
 | `commandPrefix` | 是 | 邮件命令前缀，默认是 `[COMMAND]`。 |
 | `maxReplyLength` | 否 | 自动回复最大长度，超过会截断。默认 `4000`。 |
+| `agentTimeoutMs` | 否 | Agent 单次任务最长等待时间，单位毫秒。默认 `1800000`，也就是 30 分钟。任务超过该时间还没有最终回复时，bridge 会终止本次调用并回复超时错误。 |
+| `agentCreateTimeoutMs` | 否 | 创建 Agent 会话的最长等待时间，单位毫秒。默认 `120000`，也就是 2 分钟。 |
 | `imap.host` | 是 | IMAP 服务器地址。QQ 邮箱是 `imap.qq.com`。 |
 | `imap.port` | 是 | IMAP 端口。QQ 邮箱 TLS 端口通常是 `993`。 |
 | `imap.tls` | 是 | 是否使用 IMAP TLS，通常为 `true`。 |
@@ -149,6 +158,8 @@ tail -f bridge.log
 [COMMAND] agent
 [COMMAND] agent opencode
 [COMMAND] agent codex
+[COMMAND] status
+[COMMAND] status all
 [COMMAND] cwd
 [COMMAND] cwd /Users/me/project
 [COMMAND] cwd --create /Users/me/new-project
@@ -157,6 +168,8 @@ tail -f bridge.log
 ```
 
 同一个邮件会话里，`opencode` 和 `codex` 的上下文是隔离的。切到 `codex` 时会使用 Codex 自己的会话；切回 `opencode` 时会继续 opencode 原来的会话。两边不会共享内部 session 记忆。
+
+`[COMMAND] status` 用来查看当前邮件会话里的 Agent 工作状态，包括是否正在创建会话、是否正在运行、运行了多久、当前命令、最后一条中间回复、最后错误等。`[COMMAND] status all` 会列出所有正在运行的任务；没有任务在运行时，会显示最近记录。
 
 `[COMMAND] cwd <absolute-path>` 用来设置当前邮件会话的工作目录。这个命令只能在新邮件会话的第一封邮件里执行；如果会话已经存在，bridge 会拒绝切换，并提示你用新主题重新发送。这样可以避免同一个邮箱会话中途换目录导致 Agent 会话混乱。
 
@@ -178,6 +191,7 @@ tail -f bridge.log
 ## 其他说明
 
 - 新邮件通过 IMAP `UIDNEXT` 轮询检测，默认每 3 秒检查一次。
+- 长任务期间 IMAP 连接可能被邮箱服务器断开，bridge 会在下一轮轮询时自动重连。
 - 回复邮件会带上 `In-Reply-To` 和 `References` 头，方便 Gmail、QQ 邮箱等客户端把回复归到同一会话。
-- 如果 Agent 调用失败，邮件不会被标记为已处理，bridge 会在下一轮轮询或重启后自动重试。
+- 普通任务邮件被接收并排入后台 job 后会标记为已处理；Agent 超时或失败时，bridge 会在同一邮件会话里回复错误信息。
 - `codex` CLI 通常通过 `env node` 启动。后台服务的 PATH 可能很短，所以 bridge 会自动把 `/usr/local/bin` 和 `/opt/homebrew/bin` 放到 PATH 前面，避免找不到 Node.js。

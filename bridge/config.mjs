@@ -44,6 +44,8 @@ export function loadConfig() {
   cfg.skipSubjectKeywords ||= [];
   cfg.commandPrefix ||= "[COMMAND]";
   cfg.maxReplyLength ||= 4000;
+  cfg.agentTimeoutMs ||= 1_800_000;
+  cfg.agentCreateTimeoutMs ||= 120_000;
 
   return cfg;
 }
