@@ -1,0 +1,51 @@
+{
+  "activeAgent": "opencode",
+  "senderName": "Asina_",
+  "workspaceDir": "/path/to/default/workspace",
+  "agents": {
+    "opencode": {
+      "path": "/opt/homebrew/bin/opencode"
+    },
+    "codex": {
+      "path": "/usr/local/bin/codex",
+      "execArgs": [
+        "--skip-git-repo-check",
+        "--dangerously-bypass-approvals-and-sandbox"
+      ],
+      "resumeArgs": [
+        "--skip-git-repo-check",
+        "--dangerously-bypass-approvals-and-sandbox"
+      ]
+    }
+  },
+  "whitelist": [
+    "your-email@example.com"
+  ],
+  "systemPrompt": "You are DIRECTLY replying to an email sender. Speak as the AI assistant directly to the user. Never narrate your actions. Never include metadata. Just give the answer or result. Be concise.",
+  "skipSenders": [
+    "admin@agent.qq.com",
+    "no-reply@agent.qq.com",
+    "noreply@agent.qq.com",
+    "PostMaster@agent.qq.com",
+    "postmaster@agent.qq.com",
+    "mailer-daemon@agent.qq.com"
+  ],
+  "skipSubjectKeywords": [
+    "退信",
+    "退回",
+    "bounce",
+    "undeliver"
+  ],
+  "commandPrefix": "[COMMAND]",
+  "maxReplyLength": 4000,
+  "imap": {
+    "host": "imap.qq.com",
+    "port": 993,
+    "tls": true
+  },
+  "smtp": {
+    "host": "smtp.qq.com",
+    "port": 465,
+    "secure": true
+  }
+}

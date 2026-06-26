@@ -1,0 +1,7 @@
+node_modules/
+.env
+*.log
+.DS_Store
+bridge.cfg
+.opencode-bridge.json
+.bridge.pid
